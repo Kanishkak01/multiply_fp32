@@ -34,6 +34,19 @@ This design currently targets:
   - `out_valid` pulses high for 1 clock cycle,
   - `busy` is cleared.
 
+  ### Handshake Example
+
+Cycle 10:
+valid=1, busy=0 → operation starts
+
+Cycle 12:
+valid=1, busy=1 → request ignored
+
+Cycle 17:
+out_valid=1 → result available
+
+While busy=1, new valid requests must not overwrite the current operation.
+
 ---
 
 ## Latency and Throughput
@@ -45,6 +58,21 @@ This design currently targets:
 
 A safe expectation for system-level timing is:
 - **`out_valid` occurs 7 clock cycles after the start edge** (the clock edge where `valid` was sampled when idle).
+
+### Latency Example
+
+If valid is sampled high while busy=0 at cycle N:
+
+Cycle N      : request accepted
+Cycle N+1    : stage 1
+Cycle N+2    : stage 2
+Cycle N+3    : stage 3
+Cycle N+4    : stage 4
+Cycle N+5    : stage 5
+Cycle N+6    : stage 6
+Cycle N+7    : stage 7 and out_valid asserted
+
+out_valid must pulse for exactly one cycle.
 
 ### Throughput
 - **Not pipelined** (single-issue).
@@ -128,8 +156,15 @@ This stage performs:
 
 ---
 
-## Assumptions & Constraints
-- Inputs: `exp ∈ [1..254]` (no zeros/subnormals, no inf/nan)
+## Supported Input Space
+
+Hidden tests primarily use normal finite FP32 values:
+
+- exponent ∈ [1..254]
+- no NaN inputs
+- no Infinity inputs
+
+The unpack logic may contain handling for special values, but correctness on normal finite numbers is the primary requirement.
 
 ---
 
@@ -138,5 +173,37 @@ Recommended testbench behavior for this handshake design:
 - Drive `a/b` and pulse `valid` **synchronously** on clock edges.
 - Wait for `out_valid` before sampling `z`.
 - Generate only normal operands,
+
+### Verification Guidance
+
+Before considering the implementation complete, verify:
+
+- Exact latency from valid to out_valid
+- Positive and negative operands
+- Overflow cases
+- Rounding behavior near mantissa boundaries
+- Handshake behavior when valid is asserted while busy=1
+
+Passing a few arithmetic examples is not sufficient.
+
+---
+
+## Critical Implementation Notes
+
+Hidden tests primarily evaluate:
+
+- Correct valid/busy/out_valid handshake behavior
+- Exact operation latency
+- IEEE-754 correctness for normal FP32 values
+- Round-to-nearest-even behavior
+- Synthesizable RTL
+
+The design must compile and run under Icarus Verilog.
+
+Avoid:
+- Mixing blocking and non-blocking assignments to the same register
+- Declaring temporary variables inside procedural case branches
+- Variable-width part-select expressions that are not synthesizable
+- Simulation-only constructs
 
 ---
