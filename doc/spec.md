@@ -34,7 +34,7 @@ This design currently targets:
   - `out_valid` pulses high for 1 clock cycle,
   - `busy` is cleared.
 
-  ### Handshake Example
+### Handshake Example
 
 Cycle 10:
 valid=1, busy=0 → operation starts
