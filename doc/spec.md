@@ -207,3 +207,49 @@ Avoid:
 - Simulation-only constructs
 
 ---
+
+## Implementation Strategy Guidance
+
+Before writing RTL:
+
+1. Implement and verify normal finite-number multiplication first.
+2. Handle special cases (NaN, Infinity, Zero) explicitly before entering the normal multiplication path.
+3. Treat normalized inputs as having an implicit leading 1 in the mantissa.
+4. Normalize the mantissa product before final exponent computation.
+5. Adjust the exponent after normalization when required.
+6. Prioritize arithmetic correctness before introducing pipeline complexity.
+
+Common sources of failure:
+
+* Missing hidden-bit insertion.
+* Incorrect exponent correction after normalization.
+* Incorrect handling of Infinity × 0.
+* Incorrect normalization shift decisions.
+* Implementing pipeline control before validating arithmetic correctness.
+
+## Required Self-Checks
+
+Before considering the implementation complete, verify:
+
+* 1.0 × 1.0
+* 2.0 × 2.0
+* 0 × finite
+* Infinity × finite
+* Infinity × 0
+* NaN × finite
+* A case requiring normalization
+* A case not requiring normalization
+
+Use directed tests before relying on random testing.
+
+
+## Debugging Hint
+
+If results are incorrect, inspect:
+
+1. Hidden-bit insertion.
+2. Mantissa product width.
+3. Exponent bias handling.
+4. Exponent correction after normalization.
+
+These account for the majority of implementation failures.
