@@ -30,6 +30,21 @@ Avoid:
 - Simulation-only constructs
 
 ---
+## Hidden Test Priorities
+
+The majority of hidden tests evaluate:
+
+1. Correct FP32 multiplication for normal finite numbers
+2. Correct hidden-bit insertion
+3. Correct exponent computation
+4. Correct normalization
+5. Correct round-to-nearest-even
+6. Correct 7-cycle latency
+7. Correct valid/busy/out_valid handshake
+
+Special values (NaN, Infinity, subnormal inputs) are a secondary concern.
+---
+
 
 ## Interface
 
@@ -205,9 +220,14 @@ Before considering the implementation complete, verify:
 * 1.0 × 1.0
 * 2.0 × 2.0
 * 0 × finite
-* Infinity × finite
-* Infinity × 0
-* NaN × finite
+* 1.0 × 1.0
+* 2.0 × 2.0
+* 3.0 × 5.0
+* 0.5 × 0.5
+* negative × positive
+* overflow case
+* normalization case
+* rounding case
 * A case requiring normalization
 * A case not requiring normalization
 
@@ -297,4 +317,32 @@ If results are incorrect, inspect:
 4. Exponent correction after normalization.
 
 These account for the majority of implementation failures.
+
+
+## Mandatory Verification
+
+Before submitting:
+
+1. Create a Verilog testbench.
+2. Verify:
+   - 1.0 * 1.0
+   - 2.0 * 2.0
+   - 3.0 * 5.0
+   - negative * positive
+   - overflow case
+3. Verify out_valid occurs exactly 7 cycles after acceptance.
+4. Verify valid pulses during busy do not overwrite the current operation.
+5. Compile and run the testbench under Icarus Verilog.
+
+
+## Icarus Verilog Compatibility
+
+Do NOT:
+
+- Declare registers inside case branches
+- Declare temporary variables inside procedural blocks
+- Use variable-width part selects
+- Use SystemVerilog-only constructs unsupported by Icarus
+
+Declare all temporary registers at module scope.
 
