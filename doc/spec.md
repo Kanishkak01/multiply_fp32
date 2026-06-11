@@ -10,30 +10,8 @@ This design currently targets:
 - z, a and b are single precision 32-bit IEEE-754 numbers
 
 ---
-
-## Critical Implementation Notes
-
-Hidden tests primarily evaluate:
-
-- Correct valid/busy/out_valid handshake behavior
-- Exact operation latency
-- IEEE-754 correctness for normal FP32 values
-- Round-to-nearest-even behavior
-- Synthesizable RTL
-
-The design must compile and run under Icarus Verilog.
-
-Avoid:
-- Mixing blocking and non-blocking assignments to the same register
-- Declaring temporary variables inside procedural case branches
-- Variable-width part-select expressions that are not synthesizable
-- Simulation-only constructs
-
----
 ## Hidden Test Priorities
-
 The majority of hidden tests evaluate:
-
 1. Correct FP32 multiplication for normal finite numbers
 2. Correct hidden-bit insertion
 3. Correct exponent computation
@@ -50,14 +28,24 @@ Hidden tests primarily use normal finite FP32 operands:
 Special values (NaN, Infinity, subnormal inputs) are a secondary concern.
 
 
-## Scoring Guidance
 
-Hidden tests heavily favor:
-- correct arithmetic
-- correct latency
-- correct handshake
+## Critical Implementation Notes
+Hidden tests primarily evaluate:
 
-A simple implementation that passes all normal finite-number tests will score higher than a complex implementation with partial NaN/Infinity/subnormal support.
+- Correct valid/busy/out_valid handshake behavior
+- Exact operation latency
+- IEEE-754 correctness for normal FP32 values
+- Round-to-nearest-even behavior
+- Synthesizable RTL
+
+The design must compile and run under Icarus Verilog.
+
+Avoid:
+- Mixing blocking and non-blocking assignments to the same register
+- Declaring temporary variables inside procedural case branches
+- Variable-width part-select expressions that are not synthesizable
+- Simulation-only constructs
+
 ---
 
 
@@ -167,32 +155,18 @@ Internal signals:
 - `guard_bit`, `round_bit`, `sticky`: rounding support bits for RNE
 
 ---
-## Worked Example
-Inputs:
+## Recommended Workflow
+1. Implement normal finite multiplication.
+2. Verify exponent arithmetic.
+3. Verify normalization.
+4. Verify rounding.
+5. Verify handshake.
+6. Verify latency.
+7. Only then implement NaN/Infinity support.
 
-2.0 = 0x40000000
-2.0 = 0x40000000
+Normal finite-number correctness is the primary goal.
 
-Expected output:
-4.0 = 0x40800000
 
-Reasoning:
-sign:
-0 XOR 0 = 0
-
-unbiased exponent:
-1 + 1 = 2
-
-biased exponent:
-2 + 127 = 129
-
-fraction:
-0
-
-packed result:
-0x40800000
-
----
 ## FSM / Pipeline Stages
 
 The FSM is controlled by:
@@ -206,16 +180,14 @@ All stage actions are performed inside a single sequential always block using `c
 - Convert biased exponent into unbiased form: `exp - 127`.
 - Capture signs.
 
-### Stage 2 — Special classification + denormal setup
-- Checks operand classes using `a_is_nan`, `a_is_inf`, `a_is_zero`, etc. (derived from `a_r/b_r` fields).
-- For normal operation:
-  - If exponent is nonzero => sets implicit leading 1: `a_m[23] = 1`.
-  - If exponent is zero (subnormal) => forces exponent to -126 (subnormal exponent baseline).
+### Stage 2 — Hidden Bit Setup
+For normal finite operands:
+- If exponent != 0:
+  - set mantissa[23] = 1
+- convert exponent to unbiased form
 
-> If you restrict inputs to **normal numbers only**, then:
-> - `expA` and `expB` are always 1..254,
-> - hidden-one insertion always happens,
-> - special logic is bypassed in practice.
+Hidden tests primarily use normal finite operands.
+Correct hidden-bit insertion is more important than complete special-value handling.
 
 ### Stage 3 — Input normalization (lightweight)
 - If mantissa MSB is not set, shift left and decrement exponent.
@@ -267,30 +239,21 @@ Special-value support must not break correctness on normal finite numbers.
 ---
 
 ## Required Self-Checks
-
-Before considering the implementation complete, verify:
-
 Arithmetic:
 - 1.0 × 1.0
 - 2.0 × 2.0
 - 3.0 × 5.0
-- 0.5 × 0.5
 - negative × positive
-- overflow case
 
 Normalization:
-- a case requiring normalization
-- a case not requiring normalization
-
-Rounding:
-- a case where guard=1 but no rounding occurs
-- a case where guard=1 and rounding occurs
+- normalization required
+- normalization not required
 
 Handshake:
 - valid asserted while busy=1
 - exact 7-cycle latency
 
-Use directed tests before relying on random testing.
+Compile and run these tests under Icarus Verilog.
 
 
 ## Verification Notes
@@ -331,20 +294,18 @@ Priority 3:
 A solution that is correct for normal finite numbers is preferred over a partially-correct implementation that attempts full IEEE-754 coverage.
 
 
-## Implementation Strategy Guidance
-Before writing RTL:
-1. Implement and verify normal finite-number multiplication first.
-2. Treat normalized inputs as having an implicit leading 1 in the mantissa.
-3. Normalize the mantissa product before final exponent computation.
-4. Adjust the exponent after normalization when required.
-5. Verify latency and handshake behavior.
-6. Only then add special-case support.
+## Important Hint
+Many incorrect implementations fail because of:
+- missing hidden-bit insertion
+- incorrect exponent adjustment after normalization
+- incorrect out_valid timing
+- accepting new requests while busy=1
 
-Prioritize arithmetic correctness before introducing complexity.
+Verify these before making additional architectural changes.
 
 
 ## Mandatory Verification
-The solution is NOT complete until a testbench has been written and executed.
+The solution is NOT complete until a Verilog testbench has been written, compiled, and executed successfully under Icarus Verilog.
 The testbench must verify:
 
 1. 1.0 × 1.0
@@ -375,16 +336,3 @@ Do NOT:
 Declare all temporary registers at module scope.
 
 The implementation must compile cleanly under Icarus Verilog before submission.
-
-
-## Common Sources of Failure
-1. Missing hidden-bit insertion.
-2. Incorrect exponent bias handling.
-3. Incorrect exponent correction after normalization.
-4. Incorrect mantissa extraction.
-5. Incorrect RNE implementation.
-6. Handshake accepting inputs while busy.
-7. Incorrect out_valid pulse width.
-8. Off-by-one latency errors.
-9. Updating z before the final stage.
-10. Forgetting to register inputs when valid is accepted.
