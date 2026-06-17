@@ -11,6 +11,26 @@ This design currently targets:
 
 ---
 
+## Critical Implementation Notes
+
+Hidden tests primarily evaluate:
+
+- Correct valid/busy/out_valid handshake behavior
+- Exact operation latency
+- IEEE-754 correctness for normal FP32 values
+- Round-to-nearest-even behavior
+- Synthesizable RTL
+
+The design must compile and run under Icarus Verilog.
+
+Avoid:
+- Mixing blocking and non-blocking assignments to the same register
+- Declaring temporary variables inside procedural case branches
+- Variable-width part-select expressions that are not synthesizable
+- Simulation-only constructs
+
+---
+
 ## Interface
 
 ### Ports
@@ -79,6 +99,16 @@ out_valid must pulse for exactly one cycle.
 - Max throughput is **1 result per 7 cycles** (assuming `valid` is asserted only when idle).
 
 ---
+## Non-Negotiable Behavioral Requirements
+
+The following requirements must always hold:
+
+- valid is ignored while busy=1
+- a_r and b_r must not be overwritten while busy=1
+- out_valid must pulse for exactly one cycle
+- z must only be updated when the operation completes
+- operation latency must remain fixed at 7 cycles
+
 
 ## Internal Data Model (IEEE-754 binary32)
 For each operand:
@@ -164,9 +194,25 @@ Hidden tests primarily use normal finite FP32 values:
 - no NaN inputs
 - no Infinity inputs
 
-The unpack logic may contain handling for special values, but correctness on normal finite numbers is the primary requirement.
-
+Correctness on normal finite numbers is mandatory.
+Special-value support must not break correctness on normal finite numbers.
 ---
+
+## Required Self-Checks
+
+Before considering the implementation complete, verify:
+
+* 1.0 × 1.0
+* 2.0 × 2.0
+* 0 × finite
+* Infinity × finite
+* Infinity × 0
+* NaN × finite
+* A case requiring normalization
+* A case not requiring normalization
+
+Use directed tests before relying on random testing.
+
 
 ## Verification Notes
 Recommended testbench behavior for this handshake design:
@@ -187,23 +233,68 @@ Before considering the implementation complete, verify:
 Passing a few arithmetic examples is not sufficient.
 
 ---
+## DEBUGGING REQUIREMENTS
 
-## Critical Implementation Notes
+Before modifying RTL:
 
-Hidden tests primarily evaluate:
+1. Create the smallest possible reproducer.
+2. Instrument internal signals.
+3. Verify assumptions using simulation.
+4. Never change more than one logical issue at a time.
+5. After every edit:
+   - compile
+   - run targeted tests
+   - inspect outputs
+6. If a bug involves:
+   - exponent arithmetic
+   - signed values
+   - pipeline timing
+   - handshake logic
 
-- Correct valid/busy/out_valid handshake behavior
-- Exact operation latency
-- IEEE-754 correctness for normal FP32 values
-- Round-to-nearest-even behavior
-- Synthesizable RTL
+   create dedicated debug tests before attempting fixes.
 
-The design must compile and run under Icarus Verilog.
+The preferred workflow is:
 
-Avoid:
-- Mixing blocking and non-blocking assignments to the same register
-- Declaring temporary variables inside procedural case branches
-- Variable-width part-select expressions that are not synthesizable
-- Simulation-only constructs
+observe failure
+→ isolate signal
+→ build reproducer
+→ trace pipeline
+→ identify root cause
+→ patch
+→ rerun tests
+→ verify no regression
 
----
+
+## Implementation Strategy Guidance
+
+Before writing RTL:
+
+1. Implement and verify normal finite-number multiplication first.
+2. Handle special cases (NaN, Infinity, Zero) explicitly before entering the normal multiplication path.
+3. Treat normalized inputs as having an implicit leading 1 in the mantissa.
+4. Normalize the mantissa product before final exponent computation.
+5. Adjust the exponent after normalization when required.
+6. Prioritize arithmetic correctness before introducing pipeline complexity.
+
+## Common sources of failure:
+
+1. Missing hidden-bit insertion.
+2. Incorrect exponent bias handling.
+3. Incorrect exponent correction after normalization.
+4. Incorrect mantissa extraction.
+5. Incorrect RNE implementation.
+6. Handshake accepting inputs while busy.
+7. Incorrect out_valid pulse width.
+
+
+## Debugging Hint
+
+If results are incorrect, inspect:
+
+1. Hidden-bit insertion.
+2. Mantissa product width.
+3. Exponent bias handling.
+4. Exponent correction after normalization.
+
+These account for the majority of implementation failures.
+
