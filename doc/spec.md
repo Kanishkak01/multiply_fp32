@@ -10,26 +10,9 @@ This design currently targets:
 - z, a and b are single precision 32-bit IEEE-754 numbers
 
 ---
-## Hidden Test Priorities
-The majority of hidden tests evaluate:
-1. Correct FP32 multiplication for normal finite numbers
-2. Correct hidden-bit insertion
-3. Correct exponent computation
-4. Correct normalization
-5. Correct round-to-nearest-even (RNE)
-6. Correct 7-cycle latency
-7. Correct valid/busy/out_valid handshake
-
-Hidden tests primarily use normal finite FP32 operands:
-- exponent ∈ [1..254]
-- no NaN inputs
-- no Infinity inputs
-
-Special values (NaN, Infinity, subnormal inputs) are a secondary concern.
-
-
 
 ## Critical Implementation Notes
+
 Hidden tests primarily evaluate:
 
 - Correct valid/busy/out_valid handshake behavior
@@ -47,7 +30,6 @@ Avoid:
 - Simulation-only constructs
 
 ---
-
 
 ## Interface
 
@@ -72,7 +54,7 @@ Avoid:
   - `out_valid` pulses high for 1 clock cycle,
   - `busy` is cleared.
 
-### Handshake Example
+  ### Handshake Example
 
 Cycle 10:
 valid=1, busy=0 → operation starts
@@ -116,24 +98,11 @@ out_valid must pulse for exactly one cycle.
 - **Not pipelined** (single-issue).
 - Max throughput is **1 result per 7 cycles** (assuming `valid` is asserted only when idle).
 
-### Latency Self-Test
-
-If valid is accepted at cycle 10:
-
-cycle 10 -> accept request
-cycle 11 -> stage1
-cycle 12 -> stage2
-cycle 13 -> stage3
-cycle 14 -> stage4
-cycle 15 -> stage5
-cycle 16 -> stage6
-cycle 17 -> stage7 + out_valid
-
-If out_valid appears at cycle 16 or cycle 18, the implementation is incorrect.
-
 ---
 ## Non-Negotiable Behavioral Requirements
+
 The following requirements must always hold:
+
 - valid is ignored while busy=1
 - a_r and b_r must not be overwritten while busy=1
 - out_valid must pulse for exactly one cycle
@@ -155,17 +124,6 @@ Internal signals:
 - `guard_bit`, `round_bit`, `sticky`: rounding support bits for RNE
 
 ---
-## Recommended Workflow
-1. Implement normal finite multiplication.
-2. Verify exponent arithmetic.
-3. Verify normalization.
-4. Verify rounding.
-5. Verify handshake.
-6. Verify latency.
-7. Only then implement NaN/Infinity support.
-
-Normal finite-number correctness is the primary goal.
-
 
 ## FSM / Pipeline Stages
 
@@ -180,14 +138,16 @@ All stage actions are performed inside a single sequential always block using `c
 - Convert biased exponent into unbiased form: `exp - 127`.
 - Capture signs.
 
-### Stage 2 — Hidden Bit Setup
-For normal finite operands:
-- If exponent != 0:
-  - set mantissa[23] = 1
-- convert exponent to unbiased form
+### Stage 2 — Special classification + denormal setup
+- Checks operand classes using `a_is_nan`, `a_is_inf`, `a_is_zero`, etc. (derived from `a_r/b_r` fields).
+- For normal operation:
+  - If exponent is nonzero => sets implicit leading 1: `a_m[23] = 1`.
+  - If exponent is zero (subnormal) => forces exponent to -126 (subnormal exponent baseline).
 
-Hidden tests primarily use normal finite operands.
-Correct hidden-bit insertion is more important than complete special-value handling.
+> If you restrict inputs to **normal numbers only**, then:
+> - `expA` and `expB` are always 1..254,
+> - hidden-one insertion always happens,
+> - special logic is bypassed in practice.
 
 ### Stage 3 — Input normalization (lightweight)
 - If mantissa MSB is not set, shift left and decrement exponent.
@@ -239,21 +199,19 @@ Special-value support must not break correctness on normal finite numbers.
 ---
 
 ## Required Self-Checks
-Arithmetic:
-- 1.0 × 1.0
-- 2.0 × 2.0
-- 3.0 × 5.0
-- negative × positive
 
-Normalization:
-- normalization required
-- normalization not required
+Before considering the implementation complete, verify:
 
-Handshake:
-- valid asserted while busy=1
-- exact 7-cycle latency
+* 1.0 × 1.0
+* 2.0 × 2.0
+* 0 × finite
+* Infinity × finite
+* Infinity × 0
+* NaN × finite
+* A case requiring normalization
+* A case not requiring normalization
 
-Compile and run these tests under Icarus Verilog.
+Use directed tests before relying on random testing.
 
 
 ## Verification Notes
@@ -263,6 +221,7 @@ Recommended testbench behavior for this handshake design:
 - Generate only normal operands,
 
 ### Verification Guidance
+
 Before considering the implementation complete, verify:
 
 - Exact latency from valid to out_valid
@@ -274,65 +233,68 @@ Before considering the implementation complete, verify:
 Passing a few arithmetic examples is not sufficient.
 
 ---
+## DEBUGGING REQUIREMENTS
 
-## Implementation Priority
-Implement in the following order:
-Priority 1:
-- normal finite FP32 multiplication
-- hidden-bit insertion
-- exponent arithmetic
-- normalization
-- RNE rounding
-- handshake behavior
+Before modifying RTL:
 
-Priority 2:
-- zero handling
+1. Create the smallest possible reproducer.
+2. Instrument internal signals.
+3. Verify assumptions using simulation.
+4. Never change more than one logical issue at a time.
+5. After every edit:
+   - compile
+   - run targeted tests
+   - inspect outputs
+6. If a bug involves:
+   - exponent arithmetic
+   - signed values
+   - pipeline timing
+   - handshake logic
 
-Priority 3:
-- Infinity and NaN handling
+   create dedicated debug tests before attempting fixes.
 
-A solution that is correct for normal finite numbers is preferred over a partially-correct implementation that attempts full IEEE-754 coverage.
+The preferred workflow is:
 
-
-## Important Hint
-Many incorrect implementations fail because of:
-- missing hidden-bit insertion
-- incorrect exponent adjustment after normalization
-- incorrect out_valid timing
-- accepting new requests while busy=1
-
-Verify these before making additional architectural changes.
-
-
-## Mandatory Verification
-The solution is NOT complete until a Verilog testbench has been written, compiled, and executed successfully under Icarus Verilog.
-The testbench must verify:
-
-1. 1.0 × 1.0
-2. 2.0 × 2.0
-3. 3.0 × 5.0
-4. negative × positive
-5. overflow case
-6. handshake rejection while busy
-7. exact 7-cycle latency
-
-The testbench must:
-- pulse valid for exactly one cycle
-- wait for out_valid
-- compare z against expected values
-- report PASS/FAIL for every test
-
-Compile and run the testbench under Icarus Verilog before considering the implementation complete.
+observe failure
+→ isolate signal
+→ build reproducer
+→ trace pipeline
+→ identify root cause
+→ patch
+→ rerun tests
+→ verify no regression
 
 
-## Icarus Verilog Compatibility
-Do NOT:
-- Declare registers inside case branches
-- Declare temporary variables inside procedural blocks
-- Use variable-width part selects
-- Use SystemVerilog features unsupported by Icarus
-- Mix blocking and non-blocking assignments on the same register
+## Implementation Strategy Guidance
 
-Declare all temporary registers at module scope.
+Before writing RTL:
 
-The implementation must compile cleanly under Icarus Verilog before submission.
+1. Implement and verify normal finite-number multiplication first.
+2. Handle special cases (NaN, Infinity, Zero) explicitly before entering the normal multiplication path.
+3. Treat normalized inputs as having an implicit leading 1 in the mantissa.
+4. Normalize the mantissa product before final exponent computation.
+5. Adjust the exponent after normalization when required.
+6. Prioritize arithmetic correctness before introducing pipeline complexity.
+
+## Common sources of failure:
+
+1. Missing hidden-bit insertion.
+2. Incorrect exponent bias handling.
+3. Incorrect exponent correction after normalization.
+4. Incorrect mantissa extraction.
+5. Incorrect RNE implementation.
+6. Handshake accepting inputs while busy.
+7. Incorrect out_valid pulse width.
+
+
+## Debugging Hint
+
+If results are incorrect, inspect:
+
+1. Hidden-bit insertion.
+2. Mantissa product width.
+3. Exponent bias handling.
+4. Exponent correction after normalization.
+
+These account for the majority of implementation failures.
+
